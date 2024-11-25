@@ -28,10 +28,13 @@ public class MyBot : IChessBot
         return bestMove;
     }
 
-    int EvalPos(Board board, bool isWhite) {
+    int EvalPos(Board board, bool isWhite, int depth) {
         int score = 0;
 
-        if(board.IsInCheckmate()) return int.MaxValue * bool2int(!board.IsWhiteToMove);
+        if(board.IsInCheckmate()) {
+            Console.WriteLine("MATEEE");
+            return (9999999 - depth * bool2int(!board.IsWhiteToMove))*bool2int(!board.IsWhiteToMove);
+        }
 
         score += checkWeight * bool2int(!board.IsWhiteToMove) * ((board.IsInCheck()) ? 1 : 0);
 
@@ -105,7 +108,7 @@ public class MyBot : IChessBot
     int NegaMax(int depth, int initialDepth, Board board, bool isWhite, ref Move bestMove) {
         Move[] moves = board.GetLegalMoves();
         if(depth == 0 || moves.Length == 0) 
-            return EvalPos(board, isWhite);
+            return EvalPos(board, isWhite, initialDepth);
         int max = int.MinValue;
 
         foreach(Move move in moves) {
