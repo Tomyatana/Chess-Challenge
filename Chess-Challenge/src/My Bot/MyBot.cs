@@ -32,7 +32,6 @@ public class MyBot : IChessBot
         int score = 0;
 
         if(board.IsInCheckmate()) {
-            Console.WriteLine("MATEEE");
             return (9999999 - depth * bool2int(!board.IsWhiteToMove))*bool2int(!board.IsWhiteToMove);
         }
 
@@ -105,10 +104,10 @@ public class MyBot : IChessBot
         return score * bool2int(!isWhite);
     }
 
-    int NegaMax(int depth, int initialDepth, Board board, bool isWhite, ref Move bestMove) {
+    int NegaMax(int depth, int initialDepth, Board board, bool isWhite, ref Move bestMove, int alpha = int.MinValue, int beta = int.MaxValue) {
         Move[] moves = board.GetLegalMoves();
         if(depth == 0 || moves.Length == 0) 
-            return EvalPos(board, isWhite, initialDepth);
+            return quiesce(board, isWhite, initialDepth, alpha, beta); //EvalPos(board, isWhite, initialDepth); 
         int max = int.MinValue;
 
         foreach(Move move in moves) {
@@ -117,16 +116,41 @@ public class MyBot : IChessBot
                 board.UndoMove(move);
                 continue;
             }
-            int score = -NegaMax(depth-1, initialDepth, board, isWhite, ref bestMove);
+            int score = -NegaMax(depth-1, initialDepth, board, isWhite, ref bestMove, alpha, beta);
             if(score > max) {
                 max = score;
-                if(initialDepth == depth)
-                bestMove = move;
+                if (initialDepth == depth)
+                    bestMove = move;
+                if(score > alpha)
+                    alpha = score;
             }
+            if (score >= beta)
+                break;
             board.UndoMove(move);
         }
 
         return max;
+    }
+        
+    int quiesce(Board board, bool isWhite, int depth, int alpha, int beta) {
+        int eval = EvalPos(board, isWhite, depth);
+        if(eval >= beta) {
+            return beta;
+        } 
+        if(alpha < eval) {
+            alpha = eval;
+        }
+        foreach(Move move in board.GetLegalMoves(true)) {
+            board.MakeMove(move);
+            int score = -quiesce(board, isWhite, depth, -alpha, -beta);
+            board.UndoMove(move);
+
+            if(score >= beta)
+                return beta;
+            if(score > alpha)
+                alpha = score;
+        }
+        return alpha;
     }
         
     int bool2int(bool b) {
