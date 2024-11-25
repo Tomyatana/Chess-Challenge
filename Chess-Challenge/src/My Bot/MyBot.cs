@@ -1,105 +1,132 @@
 ﻿using System;
-using System.Threading.Tasks;
-using ChessChallenge.API;
+using System.Collections.Generic;
 using System.Linq;
+using ChessChallenge.API;
 
 public class MyBot : IChessBot
 {
+    const ulong centre = 0b0000000000000000000000001100000011000000000000000000000000000;
+    const ulong outerRing = 0b000000000000000001111000010010000100100001111000000000000000000;
+    const int centreWt = 400;
+    static readonly int[] MaterialValue = {
+        0, 100, 300, 400, 600, 1500, 200000
+    };
+
+    const int mobilityWeight = 30;
+    const int checkWeight = 600;
+    const int castlingWeight = 500;
+    const int kingProtectionWt = 300;
+
+
     public Move Think(Board board, Timer timer)
     {
-        int weight = 0;
-        int moveidx = 0;
-        Move[] moves = board.GetLegalMoves();
-        for(int i = 0; i < moves.Length; i++) {
-            int newWeight = 0;
-            Move move = moves[i];
-
-            if(move.IsCapture) {
-                switch(move.CapturePieceType) {
-                case PieceType.Queen:
-                    newWeight += 5;
-                    break;
-                case PieceType.Rook:
-                    newWeight += 3;
-                    break;
-                case PieceType.Bishop:
-                case PieceType.Knight:
-                    newWeight += 2;
-                    break;
-                case PieceType.Pawn: if(move.TargetSquare.Rank == 7 || move.TargetSquare.Rank == 2) newWeight += 3;
-                    else newWeight++;
-                    break;
-                }
-            }
-
-            if(move.MovePieceType == PieceType.Pawn) {
-                if(move.TargetSquare.File < 3 || move.TargetSquare.File > 6) continue;
-                if(move.TargetSquare.Rank < 7 && move.TargetSquare.Rank > 2) {
-                    if(move.TargetSquare.File == 4 || move.TargetSquare.File == 5) {
-                        newWeight += 1;
-                        Console.WriteLine($"Moving to {move.TargetSquare.Name}, Rank: {move.TargetSquare.Rank}, File: {move.TargetSquare.File}");
-                    }
-                }
-                if(move.IsPromotion && move.PromotionPieceType == PieceType.Queen){
-                    newWeight += 5;
-                }
-            }
-
-
-            board.MakeMove(move);
-            if(board.IsInCheck()) {
-                newWeight += (board.FiftyMoveCounter > 90) ? 10 : 2;
-            }
-            if(board.IsInCheckmate()) {
-                return move;
-            }
-            if(board.IsRepeatedPosition()) {
-                i = 0;
-                moves = moves.Where(val => val != move).ToArray();
-            }
-            if(board.GameRepetitionHistory.Length > 2)
-                if(board.ZobristKey == board.GameRepetitionHistory[^2]) newWeight = -999;
-
-            if(board.IsFiftyMoveDraw()) newWeight = -999;
-
-            board.UndoMove(move);
-
-            if(isAttacked(move.TargetSquare, board, board.IsWhiteToMove)) {
-                newWeight -= 6;
-            }
-            if(move.IsEnPassant) newWeight = 999;
-            if(move.MovePieceType == PieceType.King && !board.IsInCheck()) continue;
-            if(newWeight >= weight) {
-                moveidx = i;
-                weight = newWeight;
-            }
-        }
-        Console.WriteLine(Enum.GetName<PieceType>(moves[moveidx].MovePieceType));
-        Console.WriteLine(weight);
-        board.MakeMove(moves[moveidx]);
-        board.UndoMove(moves[moveidx]);
-        return moves[moveidx];
+        bool isWhite = board.IsWhiteToMove;
+        ulong b = board.BlackPiecesBitboard;
+        Move bestMove = board.GetLegalMoves()[0];
+        int position = NegaMax(3, 3, board, isWhite, ref bestMove);
+        Console.WriteLine(position);
+        return bestMove;
     }
 
-    bool isAttacked(Square square, Board board, bool isWhite) {
-        int lsb;
+    int EvalPos(Board board, bool isWhite) {
+        int score = 0;
+
+        if(board.IsInCheckmate()) return int.MaxValue * bool2int(!board.IsWhiteToMove);
+
+        score += checkWeight * bool2int(!board.IsWhiteToMove) * ((board.IsInCheck()) ? 1 : 0);
+
+        score += castlingWeight * (
+                ((board.HasKingsideCastleRight(true)) ? 1 : 0) - ((board.HasKingsideCastleRight(false)) ? 1 : 0)
+                + ((board.HasQueensideCastleRight(true)) ? 1 : 0) - ((board.HasQueensideCastleRight(false)) ? 1 : 0)
+                );
 
         foreach(PieceType type in Enum.GetValues<PieceType>()) {
-            if(type == PieceType.None) continue;
+            ulong whiteBits = board.GetPieceBitboard(type, true);
+            ulong blackBits = board.GetPieceBitboard(type, false);
+            score += (BitboardHelper.GetNumberOfSetBits(whiteBits) - BitboardHelper.GetNumberOfSetBits(blackBits)) * MaterialValue[(int)type];
 
-            ulong pieceBoard = board.GetPieceBitboard(type, !isWhite);
+            ulong whiteCpy = whiteBits;
+            ulong blackCpy = blackBits;
+            int lsb;
+            int whiteMobility = 0;
+            int blackMobility = 0;
+            while((lsb = BitboardHelper.ClearAndGetIndexOfLSB(ref whiteCpy)) < 64) {
+                whiteMobility += BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetPieceAttacks(type, new Square(lsb), board, true));
+            }
+            while((lsb = BitboardHelper.ClearAndGetIndexOfLSB(ref blackCpy)) < 64) {
+                blackMobility += BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetPieceAttacks(type, new Square(lsb), board, false));
+            }
+            score += (whiteMobility - blackMobility) * mobilityWeight;
 
-            lsb = BitboardHelper.ClearAndGetIndexOfLSB(ref pieceBoard);
-            while(lsb != 64) {
-                Square pos = new Square(lsb);
-                lsb = BitboardHelper.ClearAndGetIndexOfLSB(ref pieceBoard);
-                ulong Attacks = BitboardHelper.GetPieceAttacks(type, pos, board, !isWhite);
-                BitboardHelper.VisualizeBitboard(Attacks);
-                if(BitboardHelper.SquareIsSet(Attacks, square)) return true;
+            switch(type) {
+            case PieceType.Pawn:
+                score += (BitboardHelper.GetNumberOfSetBits(whiteBits & centre) - BitboardHelper.GetNumberOfSetBits(blackBits & centre)) * centreWt;
+                break;
+            default:
+                score += (BitboardHelper.GetNumberOfSetBits(whiteBits & outerRing) - BitboardHelper.GetNumberOfSetBits(blackBits & outerRing)) * mobilityWeight;
+                break;
+            }
+
+            whiteCpy = whiteBits;
+            blackCpy = blackBits;
+            if(type != PieceType.King) {
+                int whiteCtrl = 0;
+                int blackCtrl = 0;
+                while((lsb = BitboardHelper.ClearAndGetIndexOfLSB(ref whiteCpy)) < 64) {
+                    whiteCtrl += BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetPieceAttacks(type, new Square(lsb), board, true) & centre);
+                }
+                while((lsb = BitboardHelper.ClearAndGetIndexOfLSB(ref blackCpy)) < 64) {
+                    blackCtrl += BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetPieceAttacks(type, new Square(lsb), board, false) & centre);
+                }
+                score += (whiteCtrl - blackCtrl) * centreWt;
+            } else {
+                int whiteKingProtection = 0;
+                int blackKingProtection = 0;
+                Square whiteKing = new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref whiteCpy));
+                whiteKingProtection += BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetPieceAttacks(type, whiteKing, board, true) & board.GetPieceBitboard(PieceType.Pawn, true));
+
+                Square blackKing = new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref blackCpy));
+                blackKingProtection += BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetPieceAttacks(type, blackKing, board, true) & board.GetPieceBitboard(PieceType.Pawn, true));
+
+                score += (whiteKingProtection - blackKingProtection) * kingProtectionWt;
+
+                score -= (
+                        BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetPieceAttacks(PieceType.Queen, whiteKing, board, true)) 
+                        - BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetPieceAttacks(PieceType.Queen, blackKing, board, false))
+                        ) * mobilityWeight;
             }
 
         }
 
-        return false/*res*/;
+
+        return score * bool2int(!isWhite);
+    }
+
+    int NegaMax(int depth, int initialDepth, Board board, bool isWhite, ref Move bestMove) {
+        Move[] moves = board.GetLegalMoves();
+        if(depth == 0 || moves.Length == 0) 
+            return EvalPos(board, isWhite);
+        int max = int.MinValue;
+
+        foreach(Move move in moves) {
+            board.MakeMove(move);
+            if(board.IsFiftyMoveDraw() || board.IsRepeatedPosition()) {
+                board.UndoMove(move);
+                continue;
+            }
+            int score = -NegaMax(depth-1, initialDepth, board, isWhite, ref bestMove);
+            if(score > max) {
+                max = score;
+                if(initialDepth == depth)
+                bestMove = move;
+            }
+            board.UndoMove(move);
+        }
+
+        return max;
+    }
+        
+    int bool2int(bool b) {
+        return (b) ? 1 : 0 * 2 - 1;
     }
 }
