@@ -101,7 +101,7 @@ public class MyBot : IChessBot
         }
 
 
-        return score * bool2int(!isWhite);
+        return score * bool2int(board.IsWhiteToMove);
     }
 
     int NegaMax(int depth, int initialDepth, Board board, bool isWhite, ref Move bestMove, int alpha = int.MinValue, int beta = int.MaxValue) {
@@ -132,23 +132,22 @@ public class MyBot : IChessBot
         return max;
     }
         
-    int quiesce(Board board, bool isWhite, int depth, int alpha, int beta) {
-        int eval = EvalPos(board, isWhite, depth);
+    int quiesce(Board board, bool isWhite, int depth, int alpha, int beta, int Depth = 1) {
+        int eval = EvalPos(board, isWhite, depth); //* bool2int(board.IsWhiteToMove);
+        if(depth == 0) return eval;
         if(eval >= beta) {
             return beta;
         } 
-        if(alpha < eval) {
-            alpha = eval;
-        }
+        alpha = Math.Max(alpha, eval);
         foreach(Move move in board.GetLegalMoves(true)) {
             board.MakeMove(move);
-            int score = -quiesce(board, isWhite, depth, -alpha, -beta);
+            int score = -quiesce(board, isWhite, depth, -beta, -alpha, depth-1);
             board.UndoMove(move);
 
-            if(score >= beta)
+            alpha = Math.Max(alpha, score);
+
+            if(alpha >= beta)
                 return beta;
-            if(score > alpha)
-                alpha = score;
         }
         return alpha;
     }
